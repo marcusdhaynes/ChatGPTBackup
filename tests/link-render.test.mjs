@@ -28,8 +28,8 @@ linkWorks('**\\<Link url="[https://openclaw.ai](https://openclaw.ai)" title="Ope
 linkWorks('<Link url="https://openclaw.ai" title="OpenClaw"/>');
 linkWorks('<Link url="https://openclaw.ai">OpenClaw</Link>');
 linkWorks('[OpenClaw](https://openclaw.ai)');
-linkWorks('https://openclaw.ai');
-linkWorks('Read https://openclaw.ai.');
+linkWorks('https://openclaw.ai','https://openclaw.ai');
+linkWorks('Read https://openclaw.ai.','https://openclaw.ai');
 const bold=linkWorks('**\\<Link url="https://openclaw.ai" title="OpenClaw"/>**');
 assert.match(bold,/<strong><a href="https:\/\/openclaw.ai\/"/);
 assert.match(bold,/<\/a><\/strong>/);
