@@ -1,0 +1,41 @@
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import fs from 'node:fs';
+import {openZip,signatureMime} from '../zip.js';
+
+const zip=await openZip(new Blob([fs.readFileSync(new URL('./sample-export.zip',import.meta.url))]));
+assert.deepEqual(zip.entries.map(x=>x.name),['Conversations__demo-part-001.zip','Files__demo-files-001.zip']);
+const nested=await openZip(await zip.getBlob(zip.entries[0]));
+const data=await nested.getBlob(nested.entries[0]);
+const media=await openZip(await zip.getBlob(zip.entries[1]));
+const image=await media.getBlob(media.entries[0]);
+assert.equal(signatureMime(new Uint8Array(await image.slice(0,20).arrayBuffer()),media.entries[0].name),'image/png');
+const outputs=[];const context=vm.createContext({self:{},postMessage:x=>outputs.push(x),TextDecoder,Blob,Number,Map,Set,Date,console});
+vm.runInContext(fs.readFileSync(new URL('../parser.worker.js',import.meta.url),'utf8'),context);
+await context.self.onmessage({data:{type:'parse',blob:data,source:'conversations-000.json'}});
+const summaries=outputs.filter(x=>x.type==='batch').flatMap(x=>x.summaries);
+assert.equal(summaries.length,2);
+const summary=summaries.find(x=>x.id==='sample-1');
+assert.equal(summary.title,'Test: multimedia & missing files');
+assert.equal(summary.media,2);
+await context.self.onmessage({data:{type:'detail',id:'sample-1',allBranches:false}});
+let detail=outputs.at(-1);
+assert.equal(detail.type,'detail');
+assert.equal(detail.messages.length,4);
+assert.equal(detail.messages[2].parts.filter(x=>x.kind==='asset').length,2);
+await context.self.onmessage({data:{type:'detail',id:'sample-1',allBranches:true}});
+assert.equal(outputs.at(-1).messages.length,5);
+await context.self.onmessage({data:{type:'search',query:'difference dat',date:'all',filter:'all',sort:'recent',request:1,missingIds:[]}});
+assert.equal(outputs.at(-1).total,2);
+await context.self.onmessage({data:{type:'search',query:'nonexistentphraseqwerty',date:'all',filter:'all',sort:'recent',request:2,missingIds:[]}});
+assert.equal(outputs.at(-1).total,0);
+
+// Many records across stream boundaries; indexing must not require loading an entire massive JSON array.
+const samples=Array.from({length:140},(_,i)=>({conversation_id:'large-'+i,title:'Searchable '+i,create_time:1710000000,mapping:{a:{id:'a',message:{author:{role:'user'},content:{parts:['hello '+i+' '+'.'.repeat(1024)]}}}}}));
+const blob=new Blob([JSON.stringify(samples)]);
+await context.self.onmessage({data:{type:'parse',blob,source:'long-conversations.json'}});
+const items=outputs.filter(x=>x.type==='batch').flatMap(x=>x.summaries);
+assert.equal(items.length,142);
+await context.self.onmessage({data:{type:'search',query:'Searchable 139',date:'all',filter:'all',sort:'recent',request:3,missingIds:[]}});
+assert.equal(outputs.at(-1).total,1);
+console.log('All archive engine tests passed. ZIP, ZIP64-compatible reader, DAT sniffing, worker indexing, search and branch selection.');

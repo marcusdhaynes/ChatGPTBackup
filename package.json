@@ -1,0 +1,1 @@
+{"name":"chatgptbackup","version":"1.0.0","private":true,"type":"module","description":"Privacy-first static ChatGPT archive viewer","scripts":{"check":"node --check app.js && node --check parser.worker.js && node --check zip.js","test":"node tests/engine.test.mjs"}}
