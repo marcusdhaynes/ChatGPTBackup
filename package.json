@@ -6,6 +6,6 @@
   "description": "Privacy-first static ChatGPT archive viewer",
   "scripts": {
     "check": "node --check app.js && node --check parser.worker.js && node --check zip.js",
-    "test": "node tests/engine.test.mjs && node tests/zip-import.test.mjs"
+    "test": "node tests/engine.test.mjs && node tests/zip-import.test.mjs && node tests/link-render.test.mjs"
   }
 }
