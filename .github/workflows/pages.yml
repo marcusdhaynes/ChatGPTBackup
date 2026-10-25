@@ -19,6 +19,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Check and test ZIP import
+        run: |
+          node --version
+          npm run check
+          npm test
       - name: Prepare static app
         run: |
           mkdir -p dist
