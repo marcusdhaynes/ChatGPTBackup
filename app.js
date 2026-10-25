@@ -52,38 +52,50 @@ async function droppedFiles(e){const items=[...(e.dataTransfer.items||[])];if(it
  }return addFiles([...(e.dataTransfer.files||[])]);
 }
 const isZip=n=>/\.zip$/i.test(n),isJson=n=>/\.json$/i.test(n),isTextOrAsset=n=>!isZip(n)&&!isJson(n)&&!(/\/$/.test(n));
-async function collectArchive(items,queue,nameQueue,depth=0,scan={files:0,nested:0}){
+const isConversationJson=n=>/^(?:conversations?(?:[-_][\w-]+)?|chat[-_]?backup(?:[-_][\w-]+)?|export(?:[-_][\w-]+)?|history(?:[-_][\w-]+)?)\.json$/i.test(basename(n));
+const isAuxiliaryJson=n=>/^(?:user|account|profile|message_feedback|shared_conversations|model_comparisons|export_manifest|conversation_asset_file_names|settings|metadata)(?:[-_][\w-]+)?\.json$/i.test(basename(n));
+// Read ZIP central directories directly. Inflate JSON on demand; keep media lazy.
+async function collectArchive(items,queue,nameQueue,alternatives=[],depth=0,scan={files:0,nested:0}){
  if(depth>5){state.warnings.push('Skipped ZIP nesting deeper than five levels.');return}
  for(const file of items){if(state.importCancelled)throw Error('Import cancelled');
   const name=file.name;
   if(isZip(name)){
    scan.nested++;
    if(scan.nested>120){state.warnings.push('Stopped opening nested ZIPs after 120 archives.');continue}
-   loading(true,'Reading ZIP index…',name,8);
+   loading(true,'Reading ZIP directly…',name,8);
    try{
     const zip=await openZip(file.blob),nested=[];
-    for(const e of zip.entries){const fullName=`${name}/${e.name}`;
-     if(basename(e.name)==='conversation_asset_file_names.json'){nameQueue.push({name:fullName,load:()=>zip.getBlob(e)});continue}
-     if(isJson(e.name)&&/^(?:conversations?(?:[-_][\w-]+)?|chat[-_]?backup|export)\.json$/i.test(basename(e.name))){queue.push({name:fullName,load:()=>zip.getBlob(e)});continue}
-     if(isZip(e.name)){nested.push({name:fullName,load:()=>zip.getBlob(e)});continue}
-     if(isTextOrAsset(e.name))addAsset(e.name,()=>zip.getBlob(e));
+    for(const e of zip.entries){
+     if(state.importCancelled)throw Error('Import cancelled');
+     const fullName=`${name}/${e.name}`,item={name:fullName,load:()=>zip.getBlob(e)};
+     if(basename(e.name)==='conversation_asset_file_names.json'){nameQueue.push(item);continue}
+     if(isJson(e.name)){
+      if(isConversationJson(e.name))queue.push(item);
+      else if(!isAuxiliaryJson(e.name))alternatives.push(item);
+      continue;
+     }
+     if(isZip(e.name)){nested.push(item);continue}
+     if(isTextOrAsset(e.name))addAsset(e.name,item.load);
      scan.files++;
     }
-    for(const nestedEntry of nested){const b=await nestedEntry.load();await collectArchive([{name:nestedEntry.name,blob:b}],queue,nameQueue,depth+1,scan)}
-   }catch(err){state.warnings.push(`${name}: ${err.message}`)}
+    for(const child of nested){
+     if(state.importCancelled)throw Error('Import cancelled');
+     const blob=await child.load();
+     await collectArchive([{name:child.name,blob}],queue,nameQueue,alternatives,depth+1,scan);
+    }
+   }catch(err){if(state.importCancelled)throw err;state.warnings.push(`${name}: ${err.message}`)}
   }else if(basename(name)==='conversation_asset_file_names.json'){nameQueue.push({name,load:async()=>file.blob})}
-  else if(isJson(name)&&/^(?:conversations?(?:[-_][\w-]+)?|chat[-_]?backup|export)\.json$/i.test(basename(name))){queue.push({name,load:async()=>file.blob});}
-  else if(isJson(name)&&depth===0){queue.push({name,load:async()=>file.blob})}
+  else if(isJson(name)){const item={name,load:async()=>file.blob};if(isConversationJson(name)||depth===0)queue.push(item);else if(!isAuxiliaryJson(name))alternatives.push(item)}
   else if(isTextOrAsset(name))addAsset(name,async()=>file.blob);
  }
 }
 async function importFiles(files){if(!files.length)return;
  if(state.loading){toast('An import is already running.');return}
  state.importCancelled=false;state.warnings=[];state.imports++;
- const queue=[],nameQueue=[];loading(true,'Opening your archive…',`${files.length} selected file${files.length===1?'':'s'}`,5);
+ const queue=[],nameQueue=[],alternatives=[];loading(true,'Opening your archive…',`${files.length} selected file${files.length===1?'':'s'}`,5);
  try{
-  await collectArchive(files,queue,nameQueue);await readNames(nameQueue);
-  if(queue.length===0){loading(false);if(!state.summary.size){toast('No conversation JSON found. Choose conversations.json or a full export ZIP.')}else{updateMissing();query();toast('Additional archive assets indexed.')}return}
+  await collectArchive(files,queue,nameQueue,alternatives);if(!queue.length)queue.push(...alternatives);await readNames(nameQueue);
+  if(queue.length===0){loading(false);if(!state.summary.size){toast(state.warnings[0]||'No conversation JSON found in that ZIP or folder.')}else{updateMissing();query();toast('Additional archive assets indexed.')}return}
   let i=0;for(const item of queue){if(state.importCancelled)break;i++;loading(true,`Importing JSON ${i} of ${queue.length}`,item.name,Math.round((i-1)/queue.length*90));
    try{const b=await item.load();await new Promise(resolve=>{state.worker._pending={resolve};state.worker.postMessage({type:'parse',blob:b,source:item.name})})}catch(err){state.warnings.push(`${item.name}: ${err.message}`)}
   }
