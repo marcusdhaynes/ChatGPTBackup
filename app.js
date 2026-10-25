@@ -134,10 +134,43 @@ function openChat(id){const a=state.summary.get(id);if(!a)return;state.selected=
  $('message-list').replaceChildren();state.messages=[];show('chat');requestDetail();renderSidebar();toggleSidebar(false);$('chat-scroll').scrollTop=0;
 }
 function icon(type){const paths={image:'<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.3" cy="8.3" r="1.5"/><path d="m3.5 17 5.2-5 4 3.5 3-3 4.8 5.5"/>',video:'<rect x="3" y="4" width="18" height="16" rx="3"/><path d="m10 8 6 4-6 4z"/>',audio:'<path d="M10 5 6 9H3v6h3l4 4V5zM14 9a4 4 0 0 1 0 6M17 6a8 8 0 0 1 0 12"/>',pdf:'<path d="M7 2h7l5 5v15H5V2zM14 2v5h5M8 17h8M8 13h8"/>',document:'<path d="M7 2h7l5 5v15H5V2zM14 2v5h5M8 12h8M8 16h8"/>',archive:'<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M11 4v3m2 2v3m-2 2v2m2 2v2"/>',file:'<path d="M7 2h7l5 5v15H5V2zM14 2v5h5"/>'};return `<svg aria-hidden="true" viewBox="0 0 24 24">${paths[type]||paths.file}</svg>`}
-function formatInline(s){let text=escaped(s);const protectedCode=[];text=text.replace(/`([^`\n]+)`/g,(_,code)=>{const key=`\u0002CODE${protectedCode.length}\u0003`;protectedCode.push(`<code>${code}</code>`);return key});
+// Only render navigable http(s) links. Everything else remains escaped text.
+function safeExternalHref(value){
+ let raw=String(value||'').trim().replace(/&amp;/gi,'&');
+ const wrapped=raw.match(/^\[[^\]\n]+\]\((https?:\/\/[^\s)]+)\)$/i);
+ if(wrapped)raw=wrapped[1];
+ try{const u=new URL(raw);return (u.protocol==='https:'||u.protocol==='http:')?u.href:null}
+ catch{return null}
+}
+function formatInline(s){
+ const protectedSpans=[];
+ const save=html=>'\u0002LINKSPAN'+(protectedSpans.push(html)-1)+'\u0003';
+ const anchor=(value,label)=>{
+  const href=safeExternalHref(value);
+  return href?save('<a href="'+escaped(href)+'" target="_blank" rel="noopener noreferrer">'+escaped(label||href)+'</a>'):null;
+ };
+ let text=String(s??'');
+ // Protect inline code before recognizing links. Code should always display literally.
+ text=text.replace(/`([^`\n]+)`/g,(_,code)=>save('<code>'+escaped(code)+'</code>'));
+ // ChatGPT export link components, including Markdown-escaped \<Link tags.
+ text=text.replace(/\\?<Link\b([^>]*?)(?:\/\s*>|>([^<]*)<\/Link\s*>)/gi,(full,attrs,body)=>{
+  const url=attrs.match(/\burl\s*=\s*(["'])(.*?)\1/i);
+  const title=attrs.match(/\btitle\s*=\s*(["'])(.*?)\1/i);
+  if(!url)return full;
+  return anchor(url[2],title?.[2]||body||url[2])||full;
+ });
+ // Regular Markdown links, including URLs whose path contains parentheses.
+ text=text.replace(/\[([^\]\n]+)\]\((https?:\/\/(?:[^\s()]|\([^)]*\))+)\)/gi,(full,label,url)=>anchor(url,label)||full);
+ // Plain URLs from archived conversations should also be clickable.
+ text=text.replace(/(^|[\s(\[{])((?:https?:\/\/)[^\s<>"'\]\u0002\u0003]+)/gi,(full,prefix,raw)=>{
+  let url=raw.replace(/[.,;!?]+$/,'');
+  if(url.endsWith(')')&&(url.match(/\(/g)||[]).length<(url.match(/\)/g)||[]).length)url=url.slice(0,-1);
+  const link=anchor(url,url);
+  return link?prefix+link+raw.slice(url.length):full;
+ });
+ text=escaped(text);
  text=text.replace(/\*\*([\s\S]+?)\*\*/g,'<strong>$1</strong>').replace(/__([^\n]+?)__/g,'<strong>$1</strong>').replace(/~~([^\n]+?)~~/g,'<del>$1</del>').replace(/(^|[^*])\*([^*\n]+)\*/g,'$1<em>$2</em>');
- text=text.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g,(_,title,url)=>`<a href="${escaped(url)}" target="_blank" rel="noopener noreferrer">${title}</a>`);
- return text.replace(/\u0002CODE(\d+)\u0003/g,(_,n)=>protectedCode[Number(n)]||'');
+ return text.replace(/\u0002LINKSPAN(\d+)\u0003/g,(_,n)=>protectedSpans[Number(n)]||'');
 }
 function markdown(md){
  const lines=String(md).split(/\r?\n/),out=[];let i=0,code=false,codeLines=[],lang='';
