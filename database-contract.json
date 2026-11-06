@@ -28,5 +28,14 @@
   "current_stage": "database_reserved_not_live",
   "source_data_migrated": false,
   "docs": "AGENTS.md",
-  "canonical_map": "marcusdhaynes/somniel-holdings/database-routing.json"
+  "canonical_map": "marcusdhaynes/somniel-holdings/database-routing.json",
+  "domain_storage_guidance": {
+    "store": [
+      "Only user-explicitly-authorized encrypted archival metadata and opt-in backups with owner-verified access"
+    ],
+    "avoid": [
+      "Unencrypted full private chats or secrets uploaded automatically; public share links"
+    ],
+    "cutover": "Offline/local chat backup continues working; no automatic upload of personal archives."
+  }
 }
